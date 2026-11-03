@@ -10,8 +10,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from agent.graph import build_graph
+from agent.graph import build_graph, prepare_input, run_config
 from agent.mcp_client import MCPToolClient
+from agent.present import present_state
 from agent.settings import LLM, POLICY, TSFM_MCP_URL, read_prompt
 
 
@@ -24,33 +25,45 @@ async def main() -> None:
         tools.call,
         LLM,
         POLICY,
-        {"select_model": read_prompt("select_model.md"), "report": read_prompt("report.md")},
-    )
-    config = {"configurable": {"thread_id": "smoke-meicheng"}}
-    await graph.ainvoke(
         {
-            "run_id": "smoke-meicheng",
-            "user_request": "预测梅城码头叶绿素未来 3 天，并和基线比较",
-            "series": history,
-            "horizon": 3,
-            "freq": "D",
-            "actual": actual,
-            "model_name": "",
-            "tool_trace": [],
-            "errors": [],
+            "select_model": read_prompt("select_model.md"),
+            "report": read_prompt("report.md"),
+            "react": read_prompt("react.md"),
         },
+    )
+    config = run_config("smoke-meicheng", POLICY)
+    await graph.ainvoke(
+        prepare_input(
+            {
+                "run_id": "smoke-meicheng",
+                "user_request": "预测梅城码头叶绿素未来 3 天，并和基线比较",
+                "series": history,
+                "horizon": 3,
+                "freq": "D",
+                "actual": actual,
+                "model_name": "",
+                "tool_trace": [],
+                "errors": [],
+            },
+            react=LLM.enabled,
+        ),
         config,
     )
     state = await graph.aget_state(config)
     values = state.values
-    print("model:", values.get("model_name"), values.get("model_reason"))
-    print("forecast:", values.get("forecast"))
-    print("baseline:", values.get("baseline"))
-    print("metrics:", values.get("metrics"))
-    print("baseline_metrics:", values.get("baseline_metrics"))
-    print("report:", values.get("report"))
-    print("errors:", values.get("errors"))
-    if not values.get("forecast") or values["forecast"].get("model") != "chronos2":
+    shown = present_state(values, "smoke-meicheng")
+    print("model:", shown.get("model_name"), shown.get("model_reason"))
+    print("tools:", [item.get("tool") for item in shown.get("tool_trace") or []])
+    print("forecast:", shown.get("forecast"))
+    print("baseline:", shown.get("baseline"))
+    print("metrics:", shown.get("metrics"))
+    print("baseline_metrics:", shown.get("baseline_metrics"))
+    print("report:", shown.get("report"))
+    print("errors:", shown.get("errors"))
+    if LLM.enabled:
+        if not (shown.get("forecast") or shown.get("baseline") or shown.get("report")):
+            raise SystemExit("ReAct 没有产出")
+    elif not shown.get("forecast") or shown["forecast"].get("model") != "chronos2":
         raise SystemExit("主预测没有走到 chronos2")
 
 

@@ -20,6 +20,17 @@ class ModelRuntime:
     def list_cards(self) -> list[dict]:
         return [spec.card() for spec in self.specs.values()]
 
+    def reset(self) -> None:
+        """卸下已加载权重。源码重新导入后调用，避免继续用旧适配器。"""
+        with self._lock:
+            if self._gpu_model is not None:
+                self._gpu_model.unload()
+            self._gpu_model = None
+            self._gpu_name = None
+            for model in self._cpu_models.values():
+                model.unload()
+            self._cpu_models.clear()
+
     def forecast(self, model: str, values: list[float], horizon: int, freq: str) -> dict:
         spec = self.specs.get(model)
         if spec is None or not spec.enabled:

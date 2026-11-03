@@ -37,6 +37,19 @@ class LLMClient:
         content = response.choices[0].message.content
         return content or ""
 
+    def as_chat_model(self):
+        """给 ReAct 用的 LangChain chat model。未配置时不要调用。"""
+        from agent.chat_model import OpenAICompatibleChat
+
+        if not self.enabled:
+            raise RuntimeError("LLM 未配置")
+        return OpenAICompatibleChat(
+            base_url=self.base_url,
+            api_key=self.api_key,
+            llm_model=self.model,
+            timeout=self.timeout,
+        )
+
 
 def parse_json_object(text: str) -> dict:
     raw = text.strip()

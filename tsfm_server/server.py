@@ -1,4 +1,4 @@
-"""FastMCP 工具面。Agent 只通过这三个工具接触模型。"""
+"""FastMCP 工具面。预测、评分和重载适配器都从这里进模型进程。"""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from mcp.server.mcpserver import MCPServer
 
 from shared.metrics import evaluate_forecast
 from tsfm_server.registry import load_registry
+from tsfm_server.reload import load_fresh_runtime
 from tsfm_server.runtime import ModelRuntime
 from tsfm_server.settings import HOST, MODELS_PATH, PORT
 
@@ -25,7 +26,7 @@ def runtime() -> ModelRuntime:
 
 mcp = MCPServer(
     "tsfm",
-    instructions="本地时序基础模型与统计基线。先 list_models，再 forecast。",
+    instructions="本地时序基础模型与统计基线。先 list_models，再 forecast。改过源码后调用 reload_models。",
 )
 
 
@@ -57,6 +58,24 @@ def evaluate(
 ) -> dict:
     """计算 MAE、MASE、区间覆盖率和 CRPS 近似。"""
     return evaluate_forecast(point, actual, history, q10, q90, season)
+
+
+@mcp.tool()
+def reload_models() -> dict:
+    """重新导入适配器源码并卸下已缓存权重。修改 tsfm_server 之后、下一次 forecast 之前调用。"""
+    global _runtime
+    try:
+        fresh = load_fresh_runtime(MODELS_PATH)
+    except Exception as exc:
+        return {"reloaded": False, "error": f"{type(exc).__name__}: {exc}"}
+    previous = _runtime
+    _runtime = fresh
+    if previous is not None:
+        try:
+            previous.reset()
+        except Exception:
+            pass
+    return {"reloaded": True, "models": [item["id"] for item in fresh.list_cards()]}
 
 
 def main() -> None:

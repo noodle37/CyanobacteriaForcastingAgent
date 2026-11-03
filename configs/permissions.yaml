@@ -2,6 +2,8 @@ allowed_tools:
   - list_models
   - forecast
   - evaluate
+  - python
+  - reload_models
 allowed_models:
   - chronos2
   - timesfm3
@@ -12,3 +14,13 @@ horizon_min: 1
 horizon_max: 64
 max_abs_value: 1.0e12
 require_approval_models: []
+max_react_steps: 12
+python_timeout_s: 20
+python_read_roots:
+  - tsfm_server
+  - shared
+  - prompts
+  - configs
+python_write_roots:
+  - tsfm_server
+  - shared

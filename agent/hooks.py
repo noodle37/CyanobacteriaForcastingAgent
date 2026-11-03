@@ -9,6 +9,10 @@ from pathlib import Path
 import yaml
 
 
+_DEFAULT_READ_ROOTS = ("tsfm_server", "shared", "prompts", "configs")
+_DEFAULT_WRITE_ROOTS = ("tsfm_server", "shared")
+
+
 @dataclass(frozen=True)
 class Policy:
     allowed_tools: tuple[str, ...]
@@ -19,6 +23,16 @@ class Policy:
     horizon_max: int = 64
     max_abs_value: float = 1e12
     require_approval_models: tuple[str, ...] = ()
+    max_react_steps: int = 12
+    python_timeout_s: float = 20
+    python_read_roots: tuple[str, ...] = _DEFAULT_READ_ROOTS
+    python_write_roots: tuple[str, ...] = _DEFAULT_WRITE_ROOTS
+
+
+def _names(raw: dict, key: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    if key not in raw or raw[key] is None:
+        return default
+    return tuple(str(item) for item in raw[key])
 
 
 def load_policy(path: Path) -> Policy:
@@ -32,6 +46,10 @@ def load_policy(path: Path) -> Policy:
         horizon_max=int(raw.get("horizon_max", 64)),
         max_abs_value=float(raw.get("max_abs_value", 1e12)),
         require_approval_models=tuple(raw.get("require_approval_models") or ()),
+        max_react_steps=int(raw.get("max_react_steps", 12)),
+        python_timeout_s=float(raw.get("python_timeout_s", 20)),
+        python_read_roots=_names(raw, "python_read_roots", _DEFAULT_READ_ROOTS),
+        python_write_roots=_names(raw, "python_write_roots", _DEFAULT_WRITE_ROOTS),
     )
 
 

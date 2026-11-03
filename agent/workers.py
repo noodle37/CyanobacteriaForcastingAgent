@@ -1,4 +1,4 @@
-"""五个 worker。每个函数只改账本增量，不自己决定图拓扑。"""
+"""固定流水线的五个 worker。没有大模型时使用。配了大模型则走 ReAct，不经过这里。"""
 
 from __future__ import annotations
 

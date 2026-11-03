@@ -9,9 +9,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from langgraph.types import Command
 
-from agent.graph import build_graph
-from agent.llm import LLMClient
+from agent.graph import build_graph, prepare_input, run_config
 from agent.mcp_client import MCPToolClient
+from agent.present import present_state
 from agent.settings import AGENT_HOST, AGENT_PORT, LLM, POLICY, TSFM_MCP_URL, read_prompt
 
 app = FastAPI(title="tsfm-agent", version="0.1.0")
@@ -19,7 +19,9 @@ _tools = MCPToolClient(TSFM_MCP_URL)
 _prompts = {
     "select_model": read_prompt("select_model.md"),
     "report": read_prompt("report.md"),
+    "react": read_prompt("react.md"),
 }
+_REACT = LLM.enabled
 _graph = build_graph(_tools.call, LLM, POLICY, _prompts)
 
 
@@ -53,24 +55,11 @@ def _payload(req: RunRequest, thread_id: str) -> dict:
 
 
 def _config(thread_id: str) -> dict:
-    return {"configurable": {"thread_id": thread_id}}
+    return run_config(thread_id, POLICY)
 
 
-def _public(state: dict, thread_id: str) -> dict:
-    kept = {
-        "thread_id": thread_id,
-        "model_name": state.get("model_name"),
-        "model_reason": state.get("model_reason"),
-        "forecast": state.get("forecast"),
-        "baseline": state.get("baseline"),
-        "metrics": state.get("metrics"),
-        "baseline_metrics": state.get("baseline_metrics"),
-        "report": state.get("report"),
-        "prepared": state.get("prepared"),
-        "tool_trace": state.get("tool_trace") or [],
-        "errors": state.get("errors") or [],
-    }
-    return kept
+def _public(state: dict, thread_id: str, *, finished: bool = True) -> dict:
+    return present_state(state, thread_id, finished=finished)
 
 
 @app.get("/health")
@@ -82,9 +71,9 @@ def health() -> dict:
 async def create_run(req: RunRequest) -> dict:
     thread_id = req.thread_id or uuid.uuid4().hex
     config = _config(thread_id)
-    await _graph.ainvoke(_payload(req, thread_id), config)
+    await _graph.ainvoke(prepare_input(_payload(req, thread_id), react=_REACT), config)
     snapshot = await _graph.aget_state(config)
-    body = _public(snapshot.values, thread_id)
+    body = _public(snapshot.values, thread_id, finished=not _interrupt_payloads(snapshot))
     interrupts = _interrupt_payloads(snapshot)
     if interrupts:
         body["status"] = "interrupt"
@@ -100,11 +89,11 @@ async def stream_run(req: RunRequest) -> StreamingResponse:
 
     async def events() -> AsyncIterator[str]:
         config = _config(thread_id)
-        async for update in _graph.astream(_payload(req, thread_id), config, stream_mode="updates"):
+        async for update in _graph.astream(prepare_input(_payload(req, thread_id), react=_REACT), config, stream_mode="updates"):
             yield _sse({"thread_id": thread_id, "update": update})
         snapshot = await _graph.aget_state(config)
-        final = _public(snapshot.values, thread_id)
         interrupts = _interrupt_payloads(snapshot)
+        final = _public(snapshot.values, thread_id, finished=not interrupts)
         final["status"] = "interrupt" if interrupts else "completed"
         final["interrupts"] = interrupts
         yield _sse(final)
@@ -118,8 +107,8 @@ async def resume_run(thread_id: str, req: ResumeRequest) -> dict:
     config = _config(thread_id)
     await _graph.ainvoke(Command(resume={"approved": req.approved}), config)
     snapshot = await _graph.aget_state(config)
-    body = _public(snapshot.values, thread_id)
     interrupts = _interrupt_payloads(snapshot)
+    body = _public(snapshot.values, thread_id, finished=not interrupts)
     body["status"] = "interrupt" if interrupts else "completed"
     body["interrupts"] = interrupts
     return body
