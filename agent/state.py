@@ -4,7 +4,6 @@ import operator
 from typing import Annotated, TypedDict
 
 from langgraph.graph.message import add_messages
-from langgraph.managed import RemainingSteps
 
 
 class TaskLedger(TypedDict, total=False):
@@ -33,7 +32,6 @@ class ReactLedger(TypedDict, total=False):
     """ReAct 图的状态。messages 走模型，其余字段给工具读写。"""
 
     messages: Annotated[list, add_messages]
-    remaining_steps: RemainingSteps
     run_id: str
     user_request: str
     series: list[float]

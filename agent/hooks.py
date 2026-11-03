@@ -27,6 +27,7 @@ class Policy:
     python_timeout_s: float = 20
     python_read_roots: tuple[str, ...] = _DEFAULT_READ_ROOTS
     python_write_roots: tuple[str, ...] = _DEFAULT_WRITE_ROOTS
+    context_window_tokens: int = 32768
 
 
 def _names(raw: dict, key: str, default: tuple[str, ...]) -> tuple[str, ...]:
@@ -50,6 +51,7 @@ def load_policy(path: Path) -> Policy:
         python_timeout_s=float(raw.get("python_timeout_s", 20)),
         python_read_roots=_names(raw, "python_read_roots", _DEFAULT_READ_ROOTS),
         python_write_roots=_names(raw, "python_write_roots", _DEFAULT_WRITE_ROOTS),
+        context_window_tokens=int(raw.get("context_window_tokens", 32768)),
     )
 
 

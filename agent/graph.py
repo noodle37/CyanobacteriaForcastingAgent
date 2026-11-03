@@ -1,6 +1,6 @@
 """业务图。
 
-配了大模型时走 LangGraph ReAct（create_react_agent）：
+配了大模型时走 LangChain create_agent：
 同一轮可以发出多个 tool call，全部返回后模型再决定下一步。
 没有大模型时退回固定流水线。
 """

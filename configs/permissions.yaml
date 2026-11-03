@@ -15,6 +15,8 @@ horizon_max: 64
 max_abs_value: 1.0e12
 require_approval_models: []
 max_react_steps: 12
+# 必须与线上大模型的输入窗口一致。压缩在达到窗口前触发，不读取服务商报错。
+context_window_tokens: 32768
 python_timeout_s: 20
 python_read_roots:
   - tsfm_server
