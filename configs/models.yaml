@@ -1,0 +1,31 @@
+models:
+  chronos2:
+    adapter: chronos2
+    enabled: true
+    device: cuda
+    checkpoint: ${CHRONOS2_CHECKPOINT}
+    context_length: 8192
+    quantiles: true
+    task: forecast
+    description: 本地 Amazon Chronos-2，零样本分位数预测
+  timesfm3:
+    adapter: timesfm3
+    enabled: true
+    device: cuda
+    checkpoint: ${TIMESFM3_CHECKPOINT}
+    context_length: 1024
+    quantiles: true
+    task: forecast
+    description: 本地 Google TimesFM-3 PyTorch 权重
+    make_positive: false
+    batch_size: 1
+  seasonal_naive:
+    adapter: seasonal_naive
+    enabled: true
+    device: cpu
+    checkpoint: ""
+    context_length: 2048
+    quantiles: true
+    task: forecast
+    description: 季节朴素基线，周期默认 7
+    season: 7

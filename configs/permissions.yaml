@@ -1,0 +1,14 @@
+allowed_tools:
+  - list_models
+  - forecast
+  - evaluate
+allowed_models:
+  - chronos2
+  - timesfm3
+  - seasonal_naive
+max_series_length: 2048
+context_tail: 512
+horizon_min: 1
+horizon_max: 64
+max_abs_value: 1.0e12
+require_approval_models: []
