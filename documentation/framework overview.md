@@ -34,7 +34,7 @@ HTTP client
 | Method | Path | Behavior |
 | --- | --- | --- |
 | `GET` | `/health` | Returns `status`, whether the LLM is configured, and the MCP URL. |
-| `POST` | `/v1/runs` | Runs one task to completion, or stops on an approval interrupt. |
+| `POST` | `/v1/runs` | Runs one task to completion, stops on an approval interrupt, or returns the partial result when the budget runs out. |
 | `POST` | `/v1/runs/stream` | Same run, streamed as server-sent events. Ends with `data: [DONE]`. |
 | `POST` | `/v1/runs/{thread_id}/resume` | Continues an interrupted run with `{"approved": true\|false}`. |
 
@@ -48,7 +48,9 @@ HTTP client
 - `model_name`: optional model id hint.
 - `thread_id`: optional. Omitted ids are random. The checkpointer is `MemorySaver`, so memory lives in this process only. A new id starts a new transcript.
 
-The public response is built by `agent/present.py`. It includes `model_name`, `model_reason`, the working `series`, `forecast`, `baseline`, `metrics`, `baseline_metrics`, `report`, `prepared`, `tool_trace`, and `errors`. On a finished ReAct run, `report` is the last assistant message that did not call a tool. If that text is missing, `agent/workers.py` fills in a template from the ledger. While a run is paused for approval, `status` is `interrupt` and `report` is left empty rather than claiming that forecasting failed.
+The public response is built by `agent/present.py`. It includes `model_name`, `model_reason`, the working `series`, `forecast`, `baseline`, `metrics`, `baseline_metrics`, `forecasts`, `evaluations`, `report`, `prepared`, `tool_trace`, and `errors`. `forecasts` and `evaluations` are append-only ledgers: every forecast and every score is kept, so a turn that runs several models in parallel loses none of them. On a finished ReAct run, `report` is the last assistant message that did not call a tool. If that text is missing, `agent/workers.py` fills in a template from the ledger. While a run is paused for approval, `status` is `interrupt` and `report` is left empty rather than claiming that forecasting failed.
+
+`status` is `completed`, `interrupt`, or `partial`. `partial` means the run was cut short but the results are usable: either the budget ran out (`budget_exhausted` is true and `budget_notice` says which limit), or an unexpected error was caught (`degraded_reason` describes it). In both cases the already-computed `forecast`, `metrics`, and `report` are returned. The endpoint never answers 500 for a failed run.
 
 ## Two graphs
 
@@ -65,7 +67,9 @@ Used when the three LLM environment variables are set. `agent/react_graph.py` ca
 
 One assistant message may contain several tool calls. Those calls run together and do not see each other's results. The model is called again after all of them return. Dependent steps (analyze, then rewrite `series`, then forecast, then score, then edit code) are later turns.
 
-`run_config` sets LangGraph `recursion_limit` to `max_react_steps * 2 + 4`. With the default `max_react_steps: 12`, that limit is 28. This stops a tool loop. It is not the token window.
+Every key a tool writes carries a reducer in `ReactLedger`, so several tools writing the same key in one turn no longer raise `InvalidUpdateError`; the reducer keeps the last write and the branch order is the same for every key, so `forecast` and `prepared` never come from different calls. `forecasts` and `evaluations` are append-only ledgers: every forecast and every score is kept, so a turn that runs two models in parallel loses neither result. `agent/present.py` returns both ledgers alongside the current slots.
+
+`run_config` sets LangGraph `recursion_limit` to `max_react_steps * 6 + 8`. With the default `max_react_steps: 12`, that limit is 80. It is only a backstop: the semantic budget is enforced by `ModelCallLimitMiddleware` and `ToolCallLimitMiddleware`, which jump to `END` when the budget runs out, so the run ends normally and keeps whatever it already computed. The factor 6 accounts for the fact that LangGraph counts each middleware hook as its own superstep (measured at about 5.9 supersteps per model call with the current middleware set). It is not the token window.
 
 Before each model call, two LangChain middlewares run. Thresholds are fractions of `context_window_tokens` (default `32768`). That number must match the deployed chat model. The code does not read a provider context-length error and then compact.
 
@@ -121,7 +125,16 @@ All five names must also appear in `allowed_tools`. The TSFM server exposes only
 
 `forecast` arguments are `model`, optional `horizon`, optional `freq`, and optional `values`. Omitted `values` means the current ledger series, including any series written back by `python`.
 
-`python` injects `series`, `horizon`, `freq`, `actual`, `forecast`, `baseline`, `metrics`, and `result`. Assigning `series` or `horizon` updates the ledger when the new values still pass `check_request`. `read_file` can read `tsfm_server/`, `shared/`, `prompts/`, and `configs/`. `write_file` can write only `tsfm_server/` and `shared/`, and only `.py`, `.yaml`, `.yml`, `.json`, `.md`, and `.txt`. After a successful write, the tool calls `reload_models` itself. Imports are limited to a small analysis set (`math`, `statistics`, `json`, `numpy`, `pandas`, and a few others). `os`, `subprocess`, and `open` are not in that set. The child is killed when `python_timeout_s` (default 20) elapses.
+`python` injects `series`, `horizon`, `freq`, `actual`, `forecast`, `baseline`, `metrics`, and `result`. Assigning `series` or `horizon` updates the ledger when the new values still pass `check_request`. `read_file` can read `tsfm_server/`, `shared/`, `prompts/`, and `configs/`. `list_files(path, pattern)` lists files under those roots and returns repository-relative paths, capped at 200 entries; it exists because the model otherwise reaches for `glob` or `os`, and `os` would hand it `os.environ`. `write_file` can write only `tsfm_server/` and `shared/`, and only `.py`, `.yaml`, `.yml`, `.json`, `.md`, and `.txt`. After a successful write, the tool calls `reload_models` itself. Imports are limited to a small analysis set (`math`, `statistics`, `json`, `numpy`, `pandas`, and a few others). `os`, `subprocess`, and `open` are not in that set. The child is killed when `python_timeout_s` (default 20) elapses.
+
+The builtins visible to model code are an explicit list in `agent/python_exec.py`, not the interpreter's `builtins`. It covers the common surface (`len`, `sum`, `sorted`, `enumerate`, `hasattr`, `getattr`, `setattr`, `dir`, `callable`, `globals`, `locals`, the usual exception classes). Anything not on that list raises `NameError`, so `hasattr` and friends must be present or model-written analysis fails for no visible reason.
+
+`numpy` and `pandas` are installed in `.venv-agent`. They bring their own file APIs, which do not go through `read_file` / `write_file` and would otherwise ignore the directory allow-list, so `agent/file_guard.py` narrows them back:
+
+- `builtins.open` and `io.open` are replaced for the duration of the model code only, and only the interpreter's own library directories are readable outside the allow-list (otherwise importing pandas would trip over its own templates).
+- `numpy.fromfile` is wrapped separately, because it uses a C-level file handle that the `open` patch cannot see.
+- `numpy.ctypeslib` and `numpy.f2py` are replaced with a placeholder that raises on use, and importing them as submodules is refused. They hand the model `ctypes` and a C compiler, which is native code execution.
+- The patch is restored when the model code finishes, including on failure.
 
 A single tool message sent back to the model is cut at 6000 characters. That cut is not the context-window policy. The middlewares above are.
 
@@ -169,7 +182,7 @@ Tests do not load Chronos or TimesFM weights.
 | `tests/test_pipeline.py` | Fixed pipeline routing, context tail of 8 in the test policy, and approval interrupt. Tools are scripted. |
 | `tests/test_react.py` | Several tool calls in one turn, a later forecast seeing a rewritten series, source edits triggering `reload_models`, and approve/deny. |
 | `tests/test_context.py` | `ClearToolUsesEdit` keeps the latest tool results. `SummarizationMiddleware` replaces older messages once the configured window is crossed. |
-| `tests/test_python_exec.py` | Series rewrite, blocked imports, write jail, subprocess round-trip, timeout. |
+| `tests/test_python_exec.py` | Series rewrite, blocked imports, write jail, subprocess round-trip, timeout, common builtins, numpy/pandas usability, and the file and native-code guard rails. |
 | `tests/test_chat_model.py` | One completion can carry two tool calls. |
 | `tests/test_reload.py` | A freshly imported runtime can forecast with `seasonal_naive`. |
 | `tests/test_metrics.py` | MAE, MASE, coverage, CRPS proxy. |

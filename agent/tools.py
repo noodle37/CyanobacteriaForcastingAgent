@@ -206,8 +206,11 @@ def make_tools(call_tool: ToolClient, policy: Policy, root: Path | None = None):
 
         可用变量：series、horizon、freq、actual、forecast、baseline、metrics、result。
         原地修改 series 或重新赋值，增强后的序列会成为后续 forecast 的默认输入。
+        可导入标准库(math、statistics、json、re、datetime、collections、itertools 等)以及 numpy、pandas。
         read_file(path) 可读 tsfm_server、shared、prompts、configs。
+        list_files(path, pattern) 列出这些目录下的文件(path 默认 "."，pattern 默认 "*")，最多 200 条。
         write_file(path, content) 只能写 tsfm_server 和 shared 下的源码，写完会自动 reload_models。
+        文件读写只有这两个入口,包括 numpy/pandas 自带的读写接口在内都受同一套目录限制。
         同一轮里的其他工具看不到这次结果。改完序列或代码后，下一轮再 forecast。
         """
         if "python" not in policy.allowed_tools:

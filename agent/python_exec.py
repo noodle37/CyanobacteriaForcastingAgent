@@ -12,6 +12,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from .file_guard import BLOCKED_SUBMODULES, Guard, file_guard, patch_imported
+
 _ALLOWED_IMPORTS = {
     "math",
     "statistics",
@@ -103,6 +105,12 @@ def run_user_code(
     written: list[str] = []
     stdout = io.StringIO()
     original = _as_floats(series)
+    guard = Guard(
+        root=root,
+        read_roots=read_roots,
+        write_roots=write_roots,
+        resolve=_resolve,
+    )
     namespace = _namespace(
         root=root,
         series=list(original),
@@ -116,6 +124,7 @@ def run_user_code(
         write_roots=write_roots,
         stdout=stdout,
         written=written,
+        guard=guard,
     )
     text = _strip_fence(code)
     if len(text) > 100_000:
@@ -123,7 +132,8 @@ def run_user_code(
     try:
         tree = ast.parse(text or "pass", filename="<python>", mode="exec")
         _reject_imports(tree)
-        exec(compile(tree, "<python>", "exec"), namespace, namespace)  # noqa: S102
+        with file_guard(guard):
+            exec(compile(tree, "<python>", "exec"), namespace, namespace)  # noqa: S102
     except SyntaxError as exc:
         return _failed(f"SyntaxError: {exc}", stdout, written)
     except Exception as exc:
@@ -147,7 +157,7 @@ def run_user_code(
     }
 
 
-def _namespace(root, series, horizon, freq, actual, forecast, baseline, metrics, read_roots, write_roots, stdout, written):
+def _namespace(root, series, horizon, freq, actual, forecast, baseline, metrics, read_roots, write_roots, stdout, written, guard=None):
     def read_file(path: str) -> str:
         dest = _resolve(root, path, read_roots)
         if not dest.is_file():
@@ -170,9 +180,54 @@ def _namespace(root, series, horizon, freq, actual, forecast, baseline, metrics,
         written.append(dest.relative_to(root.resolve()).as_posix())
         return dest.relative_to(root.resolve()).as_posix()
 
+    def list_files(path: str = ".", pattern: str = "*") -> list[str]:
+        """列出允许目录下的文件,返回相对仓库根的路径。模型没有 glob/os 权限,列目录走这里。"""
+        raw_path = str(path or ".").strip() or "."
+        if raw_path in {".", ""}:
+            base = root
+        else:
+            base = _resolve(root, raw_path, read_roots)
+        if not base.is_dir():
+            return []
+        found: list[str] = []
+        seen: set[str] = set()
+        starts = (
+            [(root / scope).resolve() for scope in read_roots]
+            if raw_path in {".", ""}
+            else [base]
+        )
+        for start in starts:
+            if not start.is_dir():
+                continue
+            for hit in sorted(start.rglob(str(pattern or "*"))):
+                if not hit.is_file():
+                    continue
+                try:
+                    rel = hit.resolve().relative_to(root.resolve())
+                except ValueError:
+                    continue
+                if not rel.parts or rel.parts[0] not in read_roots:
+                    continue
+                name = rel.as_posix()
+                if name in seen:
+                    continue
+                seen.add(name)
+                found.append(name)
+                if len(found) >= 200:
+                    return found
+        return found
+
     def _print(*args, **kwargs):
         kwargs["file"] = stdout
         print(*args, **kwargs)
+
+    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name in BLOCKED_SUBMODULES or name.split(".")[0] in {"ctypes"}:
+            raise ImportError(f"不允许导入 {name}")
+        module = _limited_import(name, globals, locals, fromlist, level)
+        if guard is not None:
+            patch_imported(name, module, guard)
+        return module
 
     safe = {
         "abs": abs,
@@ -202,6 +257,28 @@ def _namespace(root, series, horizon, freq, actual, forecast, baseline, metrics,
         "any": any,
         "slice": slice,
         "isinstance": isinstance,
+        "issubclass": issubclass,
+        "callable": callable,
+        "hasattr": hasattr,
+        "getattr": getattr,
+        "setattr": setattr,
+        "delattr": delattr,
+        "dir": dir,
+        "globals": globals,
+        "locals": locals,
+        "vars": vars,
+        "id": id,
+        "hash": hash,
+        "format": format,
+        "chr": chr,
+        "ord": ord,
+        "hex": hex,
+        "bin": bin,
+        "oct": oct,
+        "frozenset": frozenset,
+        "bytes": bytes,
+        "bytearray": bytearray,
+        "complex": complex,
         "print": _print,
         "repr": repr,
         "type": type,
@@ -215,7 +292,23 @@ def _namespace(root, series, horizon, freq, actual, forecast, baseline, metrics,
         "ZeroDivisionError": ZeroDivisionError,
         "StopIteration": StopIteration,
         "RuntimeError": RuntimeError,
-        "__import__": _limited_import,
+        "NameError": NameError,
+        "AttributeError": AttributeError,
+        "ArithmeticError": ArithmeticError,
+        "OverflowError": OverflowError,
+        "AssertionError": AssertionError,
+        "LookupError": LookupError,
+        "NotImplementedError": NotImplementedError,
+        "RecursionError": RecursionError,
+        "MemoryError": MemoryError,
+        "ImportError": ImportError,
+        "ModuleNotFoundError": ModuleNotFoundError,
+        "FileNotFoundError": FileNotFoundError,
+        "IsADirectoryError": IsADirectoryError,
+        "NotADirectoryError": NotADirectoryError,
+        "PermissionError": PermissionError,
+        "UnicodeDecodeError": UnicodeDecodeError,
+        "__import__": guarded_import,
     }
     return {
         "__builtins__": safe,
@@ -229,6 +322,7 @@ def _namespace(root, series, horizon, freq, actual, forecast, baseline, metrics,
         "result": None,
         "read_file": read_file,
         "write_file": write_file,
+        "list_files": list_files,
     }
 
 
