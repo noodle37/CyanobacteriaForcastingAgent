@@ -14,9 +14,13 @@ horizon_min: 1
 horizon_max: 64
 max_abs_value: 1.0e12
 require_approval_models: []
+# max_react_steps 是模型调用预算，max_tool_calls 是工具调用预算。
+# 两者都由 LangChain 的限额中间件执行，超限时正常收尾并返回已有结果，
+# 不再让 recursion_limit 兜底抛异常。
 max_react_steps: 12
+max_tool_calls: 48
 # 必须与线上大模型的输入窗口一致。压缩在达到窗口前触发，不读取服务商报错。
-context_window_tokens: 32768
+context_window_tokens: 1000000
 python_timeout_s: 20
 python_read_roots:
   - tsfm_server

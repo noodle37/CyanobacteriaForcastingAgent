@@ -15,6 +15,7 @@ from langgraph.graph import END, START, StateGraph
 
 from agent.hooks import Policy
 from agent.llm import LLMClient
+from agent.react_graph import SUPERSTEP_PER_MODEL_CALL
 from agent.state import TaskLedger
 from agent.workers import ToolClient, make_workers
 
@@ -54,8 +55,20 @@ def prepare_input(payload: dict, *, react: bool) -> dict:
 
 
 def run_config(thread_id: str, policy: Policy) -> dict:
+    """两层预算。
+
+    语义预算（模型调用次数、工具调用次数）由 react_graph.limit_middleware
+    执行，超限时图正常走到 END，已有结果留在 checkpoint 里。
+
+    recursion_limit 只是更外层的保险丝。LangGraph 把每个中间件钩子各算作
+    一个 superstep，所以一次模型调用约 6 个 superstep（见
+    react_graph.SUPERSTEP_PER_MODEL_CALL），保险丝必须按这个成本留足余量，
+    让语义预算先触发；万一中间件没生效，它兜底抛 GraphRecursionError，
+    app 层会捕获并把已有的部分结果照样返回，而不是 500。
+    """
     rounds = max(int(getattr(policy, "max_react_steps", 12) or 12), 2)
-    return {"configurable": {"thread_id": thread_id}, "recursion_limit": rounds * 2 + 4}
+    limit = rounds * SUPERSTEP_PER_MODEL_CALL + 8
+    return {"configurable": {"thread_id": thread_id}, "recursion_limit": limit}
 
 
 def task_message(payload: dict) -> str:

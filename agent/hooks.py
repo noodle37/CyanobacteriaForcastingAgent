@@ -24,6 +24,7 @@ class Policy:
     max_abs_value: float = 1e12
     require_approval_models: tuple[str, ...] = ()
     max_react_steps: int = 12
+    max_tool_calls: int = 48
     python_timeout_s: float = 20
     python_read_roots: tuple[str, ...] = _DEFAULT_READ_ROOTS
     python_write_roots: tuple[str, ...] = _DEFAULT_WRITE_ROOTS
@@ -48,6 +49,7 @@ def load_policy(path: Path) -> Policy:
         max_abs_value=float(raw.get("max_abs_value", 1e12)),
         require_approval_models=tuple(raw.get("require_approval_models") or ()),
         max_react_steps=int(raw.get("max_react_steps", 12)),
+        max_tool_calls=int(raw.get("max_tool_calls", 48)),
         python_timeout_s=float(raw.get("python_timeout_s", 20)),
         python_read_roots=_names(raw, "python_read_roots", _DEFAULT_READ_ROOTS),
         python_write_roots=_names(raw, "python_write_roots", _DEFAULT_WRITE_ROOTS),

@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
+from langgraph.errors import GraphRecursionError, InvalidUpdateError
 from pydantic import BaseModel, Field
 from langgraph.types import Command
 
@@ -62,6 +63,51 @@ def _public(state: dict, thread_id: str, *, finished: bool = True) -> dict:
     return present_state(state, thread_id, finished=finished)
 
 
+async def _run(config: dict, payload: dict) -> str | None:
+    """跑一次图。正常结束返回 None；降级结束返回原因字符串。
+
+    降级不等于失败：步数用尽、并发写冲突这类情况，checkpoint 里往往已经有
+    可用的预测和评分，这里只把原因记下来，交给调用方决定怎么用。
+    """
+    try:
+        await _graph.ainvoke(prepare_input(payload, react=_REACT), config)
+        return None
+    except GraphRecursionError:
+        return "模型调用步数已达上限，已保留当前结果"
+    except InvalidUpdateError as exc:
+        return f"状态更新冲突: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        return f"{type(exc).__name__}: {exc}"
+
+
+async def _snapshot(config: dict) -> tuple[dict, list]:
+    """读 checkpoint。读状态本身也可能失败，失败时返回空状态而不是再抛一次。"""
+    try:
+        snapshot = await _graph.aget_state(config)
+    except Exception:  # noqa: BLE001
+        return {}, []
+    return dict(snapshot.values or {}), _interrupt_payloads(snapshot)
+
+
+def _finish_body(values: dict, thread_id: str, interrupts: list, degraded: str | None) -> dict:
+    body = _public(values, thread_id, finished=not interrupts)
+    if interrupts:
+        body["status"] = "interrupt"
+        body["interrupts"] = interrupts
+    elif degraded:
+        body["status"] = "partial"
+        body["degraded_reason"] = degraded
+        body["errors"] = [*(body.get("errors") or []), degraded]
+    elif body.get("budget_exhausted"):
+        # 限额中间件跳到 END，图正常收尾，但这次是被预算掐断的，标成 partial
+        body["status"] = "partial"
+        body["degraded_reason"] = body.get("budget_notice") or "预算用尽，返回部分结果"
+    else:
+        body["status"] = "completed"
+        body["interrupts"] = []
+    return body
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "llm": LLM.enabled, "tsfm": TSFM_MCP_URL}
@@ -71,16 +117,9 @@ def health() -> dict:
 async def create_run(req: RunRequest) -> dict:
     thread_id = req.thread_id or uuid.uuid4().hex
     config = _config(thread_id)
-    await _graph.ainvoke(prepare_input(_payload(req, thread_id), react=_REACT), config)
-    snapshot = await _graph.aget_state(config)
-    body = _public(snapshot.values, thread_id, finished=not _interrupt_payloads(snapshot))
-    interrupts = _interrupt_payloads(snapshot)
-    if interrupts:
-        body["status"] = "interrupt"
-        body["interrupts"] = interrupts
-    else:
-        body["status"] = "completed"
-    return body
+    degraded = await _run(config, _payload(req, thread_id))
+    values, interrupts = await _snapshot(config)
+    return _finish_body(values, thread_id, interrupts, degraded)
 
 
 @app.post("/v1/runs/stream")
@@ -89,14 +128,20 @@ async def stream_run(req: RunRequest) -> StreamingResponse:
 
     async def events() -> AsyncIterator[str]:
         config = _config(thread_id)
-        async for update in _graph.astream(prepare_input(_payload(req, thread_id), react=_REACT), config, stream_mode="updates"):
-            yield _sse({"thread_id": thread_id, "update": update})
-        snapshot = await _graph.aget_state(config)
-        interrupts = _interrupt_payloads(snapshot)
-        final = _public(snapshot.values, thread_id, finished=not interrupts)
-        final["status"] = "interrupt" if interrupts else "completed"
-        final["interrupts"] = interrupts
-        yield _sse(final)
+        degraded: str | None = None
+        try:
+            async for update in _graph.astream(
+                prepare_input(_payload(req, thread_id), react=_REACT), config, stream_mode="updates"
+            ):
+                yield _sse({"thread_id": thread_id, "update": update})
+        except GraphRecursionError:
+            degraded = "模型调用步数已达上限，已保留当前结果"
+        except InvalidUpdateError as exc:
+            degraded = f"状态更新冲突: {exc}"
+        except Exception as exc:  # noqa: BLE001
+            degraded = f"{type(exc).__name__}: {exc}"
+        values, interrupts = await _snapshot(config)
+        yield _sse(_finish_body(values, thread_id, interrupts, degraded))
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(events(), media_type="text/event-stream")
@@ -105,13 +150,17 @@ async def stream_run(req: RunRequest) -> StreamingResponse:
 @app.post("/v1/runs/{thread_id}/resume")
 async def resume_run(thread_id: str, req: ResumeRequest) -> dict:
     config = _config(thread_id)
-    await _graph.ainvoke(Command(resume={"approved": req.approved}), config)
-    snapshot = await _graph.aget_state(config)
-    interrupts = _interrupt_payloads(snapshot)
-    body = _public(snapshot.values, thread_id, finished=not interrupts)
-    body["status"] = "interrupt" if interrupts else "completed"
-    body["interrupts"] = interrupts
-    return body
+    degraded: str | None = None
+    try:
+        await _graph.ainvoke(Command(resume={"approved": req.approved}), config)
+    except GraphRecursionError:
+        degraded = "模型调用步数已达上限，已保留当前结果"
+    except InvalidUpdateError as exc:
+        degraded = f"状态更新冲突: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        degraded = f"{type(exc).__name__}: {exc}"
+    values, interrupts = await _snapshot(config)
+    return _finish_body(values, thread_id, interrupts, degraded)
 
 
 def _interrupt_payloads(snapshot) -> list:

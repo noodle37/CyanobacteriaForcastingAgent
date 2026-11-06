@@ -291,18 +291,29 @@ def _template_report(state: TaskLedger, metrics: dict | None, baseline_metrics: 
     if baseline:
         lines.append(f"季节朴素基线为 {_fmt(baseline.get('point'))}。")
     if metrics:
-        lines.append(
-            f"主模型 MAE={metrics['mae']:.4f}，MASE={_num(metrics.get('mase'))}，"
-            f"coverage={_num(metrics.get('coverage'))}，CRPS 近似={metrics['crps_proxy']:.4f}。"
-        )
+        line = _metric_line("主模型", metrics)
+        if line:
+            lines.append(line)
     if baseline_metrics:
-        lines.append(f"基线 MAE={baseline_metrics['mae']:.4f}，MASE={_num(baseline_metrics.get('mase'))}。")
+        line = _metric_line("基线", baseline_metrics)
+        if line:
+            lines.append(line)
     if errors:
         lines.append("注意：" + "；".join(errors))
     return "".join(lines)
 
 
-def _num(value: float | None) -> str:
-    if value is None:
-        return "无"
-    return f"{value:.4f}"
+def _metric_line(label: str, metrics: dict) -> str:
+    """指标字典可能缺字段，缺哪个就少写哪个，不能因此把整个响应打挂。"""
+    parts: list[str] = []
+    for key, name in (("mae", "MAE"), ("mase", "MASE"), ("coverage", "coverage"), ("crps_proxy", "CRPS 近似")):
+        value = metrics.get(key)
+        if value is None:
+            continue
+        try:
+            parts.append(f"{name}={float(value):.4f}")
+        except (TypeError, ValueError):
+            continue
+    if not parts:
+        return ""
+    return f"{label} " + "，".join(parts) + "。"

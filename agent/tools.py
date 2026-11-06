@@ -104,10 +104,21 @@ def make_tools(call_tool: ToolClient, policy: Policy, root: Path | None = None):
                 {**trace, "error": str(exc)},
                 errors=[f"forecast 失败: {exc}"],
             )
-        update = {"prepared": trace} if model_id != "seasonal_naive" else {}
+        entry = {
+            "model": model_id,
+            "role": "baseline" if model_id == "seasonal_naive" else "forecast",
+            "ok": True,
+            "point": result.get("point"),
+            "q10": result.get("q10"),
+            "q90": result.get("q90"),
+            "freq": result.get("freq"),
+            "prepared": trace,
+        }
+        update: dict = {"forecasts": [entry]}
         if model_id == "seasonal_naive":
             update["baseline"] = result
         else:
+            update["prepared"] = trace
             update["forecast"] = result
             update["model_name"] = model_id
             update["model_reason"] = "ReAct 调用"
@@ -156,10 +167,16 @@ def make_tools(call_tool: ToolClient, policy: Policy, root: Path | None = None):
                 errors=[f"{which} 评分失败: {exc}"],
             )
         field = "metrics" if which == "forecast" else "baseline_metrics"
+        entry = {
+            "target": which,
+            "model": payload.get("model"),
+            "metrics": scored,
+        }
         return _finish(
             tool_call_id,
             {"ok": True, "target": which, "metrics": scored},
             {"tool": "evaluate", "target": which, "allowed": True},
+            evaluations=[entry],
             **{field: scored},
         )
 
