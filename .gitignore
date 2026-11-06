@@ -6,3 +6,5 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 *.log
+# 测试代码不纳入版本管理
+tests/
