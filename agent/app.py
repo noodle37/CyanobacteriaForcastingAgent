@@ -41,6 +41,15 @@ class ResumeRequest(BaseModel):
     thread_id: str
 
 
+class BatchForecastRequest(BaseModel):
+    series: list[list[float | None]]
+    horizon: int
+    freq: str = "D"
+    model: str = "chronos2"
+    cross_learning: bool = True
+    batch_size: int = 100
+
+
 def _payload(req: RunRequest, thread_id: str) -> dict:
     return {
         "run_id": thread_id,
@@ -145,6 +154,22 @@ async def stream_run(req: RunRequest) -> StreamingResponse:
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(events(), media_type="text/event-stream")
+
+
+@app.post("/v1/forecast-batch")
+async def forecast_batch(req: BatchForecastRequest) -> dict:
+    """按官方 Chronos-2 方式一批预测。不经过 ReAct，直接把这一窗的序列交给模型。"""
+    return await _tools.call(
+        "forecast_batch",
+        {
+            "model": req.model,
+            "series": req.series,
+            "horizon": req.horizon,
+            "freq": req.freq,
+            "cross_learning": req.cross_learning,
+            "batch_size": req.batch_size,
+        },
+    )
 
 
 @app.post("/v1/runs/{thread_id}/resume")

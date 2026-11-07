@@ -17,6 +17,8 @@ import json
 import os
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Iterable, Iterator, List, Optional, Sequence
 
@@ -39,14 +41,18 @@ from gluonts.ev.metrics import (  # noqa: E402
     SMAPE,
     MeanWeightedSumQuantileLoss,
 )
-from gluonts.model import evaluate_model  # noqa: E402
+from gluonts.dataset.util import forecast_start  # noqa: E402
+from gluonts.model import evaluate_forecasts, evaluate_model  # noqa: E402
+from gluonts.model.forecast import QuantileForecast  # noqa: E402
 from gluonts.time_feature import get_seasonality  # noqa: E402
 
 from evaluation.gift_eval.agent_predictor import (  # noqa: E402
     DEFAULT_QUANTILE_LEVELS,
     AgentPredictor,
     SeriesTrace,
+    quantiles_from_payload,
 )
+from evaluation.gift_eval.windows import restore_window_order, window_indexes  # noqa: E402
 
 # 官方提交文件的列顺序。
 OFFICIAL_COLUMNS = [
@@ -183,6 +189,109 @@ def config_name(name: str, freq: str, term: str, properties: dict) -> str:
     return f"{key}/{freq_dir}/{term}"
 
 
+def _series_payload(target) -> list:
+    array = np.asarray(target, dtype=float).reshape(-1)
+    return [None if not np.isfinite(value) else float(value) for value in array]
+
+
+def _post_batch(url: str, payload: dict, timeout_s: float) -> dict:
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
+    if "forecasts" not in body:
+        raise RuntimeError(f"批量预测没有返回 forecasts: {list(body)[:8]}")
+    return body
+
+
+def _evaluate_chronos_official(dataset, test_data, season_length: int, args: argparse.Namespace):
+    """按官方 notebook 预测：同一窗口的序列一批、batch 100、打开跨序列学习，缺测保持为 NaN。"""
+    entries = list(test_data.input)
+    n_windows = int(getattr(test_data, "windows", None) or dataset.test_data.windows)
+    groups = []
+    traces: List[SeriesTrace] = []
+    chunk = max(int(args.chronos_batch_size), 1)
+    for indexes in window_indexes(len(entries), n_windows):
+        window_entries = [entries[index] for index in indexes]
+        forecasts = []
+        for start in range(0, len(window_entries), chunk):
+            batch = window_entries[start : start + chunk]
+            started = time.perf_counter()
+            body = _post_batch(
+                f"{args.agent_url.rstrip('/')}/v1/forecast-batch",
+                {
+                    "model": "chronos2",
+                    "series": [_series_payload(entry["target"]) for entry in batch],
+                    "horizon": int(dataset.prediction_length),
+                    "freq": str(dataset.freq),
+                    "cross_learning": True,
+                    "batch_size": chunk,
+                },
+                args.timeout_s,
+            )
+            elapsed = time.perf_counter() - started
+            returned = body["forecasts"]
+            if len(returned) != len(batch):
+                raise RuntimeError(f"批量预测返回 {len(returned)} 条，请求了 {len(batch)} 条")
+            each = elapsed / len(batch)
+            for entry, payload in zip(batch, returned):
+                target = np.asarray(entry["target"], dtype=float).reshape(-1)
+                quantiles = quantiles_from_payload(
+                    payload,
+                    DEFAULT_QUANTILE_LEVELS,
+                    list(payload.get("point") or []),
+                )
+                length = len(quantiles[DEFAULT_QUANTILE_LEVELS[0]])
+                if length < dataset.prediction_length:
+                    raise RuntimeError(f"返回 {length} 步，少于任务要求的 {dataset.prediction_length} 步")
+                if length > dataset.prediction_length:
+                    quantiles = {
+                        level: values[: dataset.prediction_length] for level, values in quantiles.items()
+                    }
+                forecasts.append(
+                    QuantileForecast(
+                        forecast_arrays=np.vstack(
+                            [np.asarray(quantiles[level], dtype=float) for level in DEFAULT_QUANTILE_LEVELS]
+                        ),
+                        start_date=forecast_start(entry),
+                        forecast_keys=[str(level) for level in DEFAULT_QUANTILE_LEVELS],
+                        item_id=entry.get("item_id"),
+                    )
+                )
+                used = min(int(target.size), 8192)
+                traces.append(
+                    SeriesTrace(
+                        item_id=str(entry.get("item_id")),
+                        context_len=int(target.size),
+                        used_len=used,
+                        truncated=used != int(target.size),
+                        elapsed_s=each,
+                        status="completed",
+                        model_name=payload.get("model") or "chronos2",
+                    )
+                )
+        groups.append(forecasts)
+    forecasts = restore_window_order(groups)
+    result = evaluate_forecasts(
+        forecasts,
+        test_data=test_data,
+        metrics=build_metrics(),
+        batch_size=args.batch_size,
+        axis=None,
+        mask_invalid_label=True,
+        allow_nan_forecast=False,
+        seasonality=season_length,
+    )
+    return result, traces
+
+
 def evaluate_task(
     name: str,
     term: str,
@@ -204,29 +313,32 @@ def evaluate_task(
         )
         return None
 
-    predictor = AgentPredictor(
-        prediction_length=dataset.prediction_length,
-        freq=dataset.freq,
-        agent_url=args.agent_url,
-        quantile_levels=DEFAULT_QUANTILE_LEVELS,
-        max_context=args.max_context,
-        timeout_s=args.timeout_s,
-        user_request=args.user_request,
-    )
-
     test_data = LimitedTestData(dataset.test_data, limit=args.limit_series, strategy=args.sample_strategy)
     started = time.perf_counter()
     try:
-        result = evaluate_model(
-            predictor,
-            test_data=test_data,
-            metrics=build_metrics(),
-            batch_size=args.batch_size,
-            axis=None,
-            mask_invalid_label=True,
-            allow_nan_forecast=False,
-            seasonality=season_length,
-        )
+        if args.protocol == "chronos-official":
+            result, traces = _evaluate_chronos_official(dataset, test_data, season_length, args)
+        else:
+            predictor = AgentPredictor(
+                prediction_length=dataset.prediction_length,
+                freq=dataset.freq,
+                agent_url=args.agent_url,
+                quantile_levels=DEFAULT_QUANTILE_LEVELS,
+                max_context=args.max_context,
+                timeout_s=args.timeout_s,
+                user_request=args.user_request,
+            )
+            result = evaluate_model(
+                predictor,
+                test_data=test_data,
+                metrics=build_metrics(),
+                batch_size=args.batch_size,
+                axis=None,
+                mask_invalid_label=True,
+                allow_nan_forecast=False,
+                seasonality=season_length,
+            )
+            traces = predictor.traces
     except Exception as exc:
         elapsed = time.perf_counter() - started
         key, _freq_dir = split_dataset_name(name)
@@ -248,7 +360,6 @@ def evaluate_task(
         return row
     elapsed = time.perf_counter() - started
 
-    traces: List[SeriesTrace] = predictor.traces
     key, _freq_dir = split_dataset_name(name)
     key = PRETTY_NAMES.get(key.lower(), key.lower())
     meta = properties.get(key) or {}
@@ -276,6 +387,8 @@ def evaluate_task(
             continue
         row[column] = metric_value(result, column.replace("eval_metrics/", ""))
     row["notes"] = f"wall={elapsed:.1f}s"
+    if args.protocol == "chronos-official":
+        row["notes"] += "; 九档分位、全上下文、按窗口跨序列预测"
     if not np.isfinite(float(row["eval_metrics/MASE[0.5]"])):
         row["notes"] += "; 指标无定义(所抽序列的标签窗口整体缺测)"
         print(f"[提示] {row['dataset']} 指标为 nan,通常是所抽序列的标签窗口整体缺测", flush=True)
@@ -314,11 +427,18 @@ def main() -> None:
         help="序列抽样策略,默认等距抽样",
     )
     parser.add_argument("--agent-url", default="http://127.0.0.1:8000", help="Agent 服务地址")
+    parser.add_argument(
+        "--protocol",
+        default="agent",
+        choices=["agent", "chronos-official"],
+        help="agent 走现有 HTTP 流水线；chronos-official 按官方 notebook 批量调用 Chronos-2",
+    )
+    parser.add_argument("--chronos-batch-size", type=int, default=100, help="官方协议下每一批的序列数")
     parser.add_argument("--model-name", default="tsfm-agent", help="结果中记录的名字")
     parser.add_argument("--max-context", type=int, default=2048, help="提交给 Agent 的最大上下文点数")
     parser.add_argument("--max-horizon", type=int, default=64, help="Agent 策略允许的最大预测步数")
     parser.add_argument("--timeout-s", type=float, default=900.0, help="单次请求超时秒数")
-    parser.add_argument("--batch-size", type=int, default=512)
+    parser.add_argument("--batch-size", type=int, default=512, help="指标聚合时的批大小，不是模型批大小")
     parser.add_argument("--out", default=str(ROOT / "evaluation" / "results" / "gift_eval"), help="结果目录")
     parser.add_argument(
         "--user-request",
