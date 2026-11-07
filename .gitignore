@@ -1,10 +1,14 @@
 .venv-agent/
 .venv-tsfm/
+.venv-gift/
 .env
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
 *.log
+# 基准源码与数据不入版本管理,获取方式见 documentation/gift-eval.md
+third_party/
+evaluation/results/
 # 测试代码不纳入版本管理
 tests/
