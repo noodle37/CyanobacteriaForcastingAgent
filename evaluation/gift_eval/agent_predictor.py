@@ -140,11 +140,10 @@ class AgentPredictor(Predictor):
             )
             raise AgentRequestError(message)
 
-        quantiles = expand_quantiles(
-            point=list(point),
-            q10=payload.get("q10"),
-            q90=payload.get("q90"),
+        quantiles = quantiles_from_payload(
+            payload,
             levels=self.quantile_levels,
+            point=list(point),
         )
         self.traces.append(
             SeriesTrace(
@@ -200,6 +199,21 @@ class AgentPredictor(Predictor):
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:500]
             raise AgentRequestError(f"HTTP {exc.code}: {detail}") from exc
+
+
+def quantiles_from_payload(payload: dict, levels: Sequence[float], point: List[float]) -> dict:
+    """优先用模型自己的九档分位。没有时才从点预测和 q10、q90 插值。"""
+    native = payload.get("quantiles") or {}
+    if native and all(_quantile_key(level) in native or level in native for level in levels):
+        return {
+            float(level): list(native.get(_quantile_key(level), native.get(level)))
+            for level in levels
+        }
+    return expand_quantiles(point, payload.get("q10"), payload.get("q90"), levels)
+
+
+def _quantile_key(level: float) -> str:
+    return format(float(level), "g")
 
 
 def expand_quantiles(

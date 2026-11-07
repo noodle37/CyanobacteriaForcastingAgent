@@ -42,6 +42,30 @@ class ModelRuntime:
             adapter = self._acquire(spec)
             return adapter.forecast(values, horizon, freq)
 
+    def forecast_batch(
+        self,
+        model: str,
+        series: list[list],
+        horizon: int,
+        freq: str,
+        cross_learning: bool = False,
+        batch_size: int = 100,
+    ) -> list[dict]:
+        spec = self.specs.get(model)
+        if spec is None or not spec.enabled:
+            known = ", ".join(sorted(self.specs))
+            raise ValueError(f"模型不可用: {model}。已注册: {known}")
+        if horizon < 1:
+            raise ValueError("horizon 必须为正")
+        if not series:
+            raise ValueError("series 不能为空")
+        with self._lock:
+            adapter = self._acquire(spec)
+            forecast_batch = getattr(adapter, "forecast_batch", None)
+            if forecast_batch is None:
+                return [adapter.forecast(values, horizon, freq) for values in series]
+            return forecast_batch(series, horizon, freq, cross_learning=cross_learning, batch_size=batch_size)
+
     def _acquire(self, spec: ModelSpec) -> BaseTSFMModel:
         if str(spec.device).startswith("cuda"):
             if self._gpu_name != spec.id:

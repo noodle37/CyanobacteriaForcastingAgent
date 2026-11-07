@@ -48,6 +48,48 @@ def forecast(model: str, values: list[float], horizon: int, freq: str = "D") -> 
 
 
 @mcp.tool()
+def forecast_batch(
+    model: str,
+    series: list[list[float | None]],
+    horizon: int,
+    freq: str = "D",
+    cross_learning: bool = False,
+    batch_size: int = 100,
+) -> dict:
+    """一批序列一起预测。cross_learning 为真时，同一批内部按官方 Chronos-2 方式共享信息。"""
+    if horizon < 1 or horizon > 64:
+        raise ValueError("horizon 必须在 1 到 64 之间")
+    if not series:
+        raise ValueError("series 不能为空")
+    trimmed = [_trim_series(values) for values in series]
+    log.info(
+        "forecast_batch model=%s batch=%s horizon=%s cross_learning=%s",
+        model,
+        len(trimmed),
+        horizon,
+        cross_learning,
+    )
+    return {
+        "forecasts": runtime().forecast_batch(
+            model,
+            trimmed,
+            horizon,
+            freq,
+            cross_learning=cross_learning,
+            batch_size=batch_size,
+        )
+    }
+
+
+def _trim_series(values: list[float | None]) -> list[float | None]:
+    if len(values) < 2:
+        raise ValueError("values 长度必须至少为 2")
+    if len(values) > 8192:
+        values = values[-8192:]
+    return list(values)
+
+
+@mcp.tool()
 def evaluate(
     point: list[float],
     actual: list[float],
