@@ -1,0 +1,5 @@
+station,model,target,days,coverage,mae,peak3_covered,max_day,max_actual,max_day_point,max_day_covered,pred_max,pred_max_day
+jiangjunyan,transformer_nopos,max,25,0.92,0.944,3/3,2026-09-19,3.9,3.473,True,12.703,2026-09-01
+meichengmatou,transformer_nopos,max,29,0.759,1.191,2/3,2026-09-27,10.56,7.152,True,8.251,2026-09-28
+yanlingwu,transformer_nopos,max,30,0.7,1.709,2/3,2026-09-23,13.35,9.06,False,11.528,2026-09-24
+yanziling,transformer_nopos,max,29,0.862,3.123,2/3,2026-09-25,26.72,10.098,False,21.037,2026-09-26

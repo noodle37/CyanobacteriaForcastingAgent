@@ -1,0 +1,5 @@
+station,model,target,days,coverage,mae,peak3_covered,max_day,max_actual,max_day_point,max_day_covered,pred_max,pred_max_day
+jiangjunyan,seasonal_naive,max,30,0.733,0.743,0/3,2025-09-27,16.7,15.3,False,15.3,2025-09-27
+meichengmatou,seasonal_naive,max,29,0.655,23.151,3/3,2025-09-10,75.69,26.78,True,75.69,2025-09-17
+yanlingwu,seasonal_naive,max,30,0.567,45.415,0/3,2025-09-13,220.16,44.25,False,220.16,2025-09-20
+yanziling,seasonal_naive,max,27,0.593,30.466,0/3,2025-09-13,135.22,30.025,False,135.22,2025-09-20

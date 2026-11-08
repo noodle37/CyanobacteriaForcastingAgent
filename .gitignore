@@ -1,14 +1,27 @@
 .venv-agent/
 .venv-tsfm/
 .venv-gift/
+# 本地环境变量与密钥,示例保留
 .env
+.env.*
+!.env.example
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
 *.log
+# 模型权重与训练产物不入版本管理
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.joblib
+*.pkl
+data/baselines/
 # 基准源码与数据不入版本管理,获取方式见 documentation/gift-eval.md
 third_party/
 evaluation/results/
 # 测试代码不纳入版本管理
 tests/
+.DS_Store

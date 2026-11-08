@@ -1,0 +1,139 @@
+{
+  "note": "未来天气为逐日实测/再分析值(非预报存档), 因此 rsi_v2_fwx 是完美未来天气上界实验; 未来天气只进入 RSI 融合 prompt, TSFM/基线不变。",
+  "files": {
+    "rsi_v1": "2026_rsi_v1_max_h3_details.csv",
+    "rsi_v2": "2026_rsi_max_h3_details.csv",
+    "rsi_v2_fwx": "2026_rsi_max_h3_fwx_details.csv",
+    "tsfm_chronos2": "2026_chronos2_max_ctx28_h3_details.csv"
+  },
+  "overall": {
+    "rsi_v1": {
+      "n": 309,
+      "mae": 2.423,
+      "rmse": 3.633,
+      "wmae": 2.892,
+      "wrmse": 4.376,
+      "pre": 0.152
+    },
+    "rsi_v2": {
+      "n": 309,
+      "mae": 2.351,
+      "rmse": 3.555,
+      "wmae": 2.827,
+      "wrmse": 4.31,
+      "pre": 0.152
+    },
+    "rsi_v2_fwx": {
+      "n": 309,
+      "mae": 2.341,
+      "rmse": 3.559,
+      "wmae": 2.825,
+      "wrmse": 4.327,
+      "pre": 0.112
+    },
+    "tsfm_chronos2": {
+      "n": 309,
+      "mae": 2.394,
+      "rmse": 3.618,
+      "wmae": 2.885,
+      "wrmse": 4.394,
+      "pre": 0.152
+    },
+    "rsi_v2_fwx_cap10": {
+      "n": 309,
+      "mae": 2.341,
+      "rmse": 3.551,
+      "wmae": 2.821,
+      "wrmse": 4.315,
+      "pre": 0.152
+    },
+    "rsi_v2_fwx_relax_cap10": {
+      "n": 309,
+      "mae": 2.298,
+      "rmse": 3.454,
+      "wmae": 2.761,
+      "wrmse": 4.186,
+      "pre": 0.152
+    }
+  },
+  "fwx_vs_rsi_v1": {
+    "n": 309,
+    "diff": -0.0823,
+    "lo": -0.16,
+    "hi": -0.0111,
+    "p_two_sided": 0.0232,
+    "win_rate": 0.385
+  },
+  "fwx_vs_rsi_v2": {
+    "n": 309,
+    "diff": -0.0099,
+    "lo": -0.0383,
+    "hi": 0.0183,
+    "p_two_sided": 0.504,
+    "win_rate": 0.272
+  },
+  "fwx_vs_tsfm_chronos2": {
+    "n": 309,
+    "diff": -0.0528,
+    "lo": -0.0744,
+    "hi": -0.0316,
+    "p_two_sided": 0.0,
+    "win_rate": 0.191
+  },
+  "fwx_vs_rsi_v2_fwx_cap10": {
+    "n": 309,
+    "diff": -0.0004,
+    "lo": -0.0305,
+    "hi": 0.0299,
+    "p_two_sided": 0.9622,
+    "win_rate": 0.337
+  },
+  "fwx_vs_rsi_v2_fwx_relax_cap10": {
+    "n": 309,
+    "diff": 0.0424,
+    "lo": -0.0041,
+    "hi": 0.0872,
+    "p_two_sided": 0.0742,
+    "win_rate": 0.534
+  },
+  "cap10_vs_v2": {
+    "n": 309,
+    "diff": -0.0095,
+    "lo": -0.0421,
+    "hi": 0.0225,
+    "p_two_sided": 0.5956,
+    "win_rate": 0.282
+  },
+  "cap10_vs_fwx": {
+    "n": 309,
+    "diff": 0.0004,
+    "lo": -0.0299,
+    "hi": 0.0305,
+    "p_two_sided": 0.9622,
+    "win_rate": 0.314
+  },
+  "relax_vs_v2": {
+    "n": 309,
+    "diff": -0.0523,
+    "lo": -0.1036,
+    "hi": -0.0017,
+    "p_two_sided": 0.0432,
+    "win_rate": 0.434
+  },
+  "relax_vs_fwx": {
+    "n": 309,
+    "diff": -0.0424,
+    "lo": -0.0872,
+    "hi": 0.0041,
+    "p_two_sided": 0.0742,
+    "win_rate": 0.414
+  },
+  "relax_vs_cap10": {
+    "n": 309,
+    "diff": -0.0428,
+    "lo": -0.0846,
+    "hi": -0.0005,
+    "p_two_sided": 0.0482,
+    "win_rate": 0.392
+  }
+}

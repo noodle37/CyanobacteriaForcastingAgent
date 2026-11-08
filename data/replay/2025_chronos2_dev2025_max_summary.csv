@@ -1,0 +1,5 @@
+station,model,target,days,coverage,mae,peak3_covered,max_day,max_actual,max_day_point,max_day_covered,pred_max,pred_max_day
+jiangjunyan,chronos2,max,30,0.8,0.292,3/3,2025-09-27,16.7,16.471,True,16.654,2025-09-28
+meichengmatou,chronos2,max,29,0.793,10.393,3/3,2025-09-10,75.69,61.993,True,78.588,2025-09-11
+yanlingwu,chronos2,max,30,0.8,19.035,1/3,2025-09-13,220.16,78.459,False,187.865,2025-09-14
+yanziling,chronos2,max,27,0.741,13.361,0/3,2025-09-13,135.22,54.869,False,98.426,2025-09-14

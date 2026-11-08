@@ -1,0 +1,5 @@
+station,days,coverage,mae,width,coverage_1st_half,coverage_2nd_half,peak3,max_day_covered,models
+jiangjunyan,25,0.64,0.431,1.08,0.75,0.54,2/3,False,"{'chronos2': 20, 'timesfm3': 5}"
+meichengmatou,29,0.724,0.711,1.67,0.93,0.53,0/3,False,"{'chronos2': 20, 'timesfm3': 9}"
+yanlingwu,30,0.867,0.816,2.94,0.87,0.87,2/3,True,"{'chronos2': 26, 'timesfm3': 4}"
+yanziling,29,0.828,1.808,6.7,0.79,0.87,2/3,True,"{'chronos2': 21, 'timesfm3': 8}"

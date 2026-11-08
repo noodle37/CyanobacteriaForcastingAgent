@@ -1,0 +1,5 @@
+station,days,coverage,mae,width,coverage_1st_half,coverage_2nd_half,peak3,max_day_covered,models
+jiangjunyan,25,0.76,0.76,3.34,0.92,0.62,3/3,True,"{'chronos2': 21, 'seasonal_naive': 4}"
+meichengmatou,29,0.517,1.916,3.71,0.57,0.47,0/3,False,"{'timesfm3': 15, 'seasonal_naive': 9, 'chronos2': 5}"
+yanlingwu,30,0.533,2.694,4.77,0.6,0.47,1/3,False,"{'chronos2': 13, 'seasonal_naive': 13, 'timesfm3': 4}"
+yanziling,29,0.724,3.769,10.6,0.86,0.6,1/3,False,"{'chronos2': 16, 'seasonal_naive': 9, 'timesfm3': 4}"

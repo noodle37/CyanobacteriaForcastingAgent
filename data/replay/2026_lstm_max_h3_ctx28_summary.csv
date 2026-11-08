@@ -1,0 +1,5 @@
+station,model,target,days,coverage,mae,peak3_covered,max_day,max_actual,max_day_point,max_day_covered,pred_max,pred_max_day
+jiangjunyan,lstm,max,63,0.603,3.293,3/3,2026-09-19,3.9,5.763,True,7.345,2026-09-29
+meichengmatou,lstm,max,81,0.654,1.967,3/3,2026-09-27,10.56,6.55,True,11.166,2026-09-28
+yanlingwu,lstm,max,84,0.893,2.99,3/3,2026-09-23,13.35,7.844,True,17.492,2026-09-30
+yanziling,lstm,max,81,0.556,5.772,0/3,2026-09-25,26.72,4.223,False,12.453,2026-09-04
